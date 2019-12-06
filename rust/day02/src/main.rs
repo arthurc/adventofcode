@@ -4,13 +4,32 @@ fn main() {
     let f = std::fs::File::open(std::env::args().nth(1).expect("Could not get arg 1"))
         .expect("Could not open input file");
 
-    let mut program = Program::new(read_intcode(f).collect());
+    let code: Vec<u32> = read_intcode(f).collect();
 
-    while !program.finished {
-        program.tick();
+    for noun in 0..=99 {
+        for verb in 0..=99 {
+            let mut code = code.clone();
+            //code[0] = 0;
+            code[1] = noun;
+            code[2] = verb;
+
+            let mut program = Program::new(code);
+
+            while !program.finished {
+                program.tick();
+            }
+
+            if program.code[0] == 19690720 {
+                println!(
+                    "noun = {}, verb = {}, 100 * noun + verb = {}",
+                    noun,
+                    verb,
+                    100 * noun + verb
+                );
+                break;
+            }
+        }
     }
-
-    println!("{:?}", program.code);
 }
 
 fn read_intcode<R>(read: R) -> impl Iterator<Item = u32>
