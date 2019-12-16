@@ -9,7 +9,6 @@ fn main() {
     for noun in 0..=99 {
         for verb in 0..=99 {
             let mut code = code.clone();
-            //code[0] = 0;
             code[1] = noun;
             code[2] = verb;
 
