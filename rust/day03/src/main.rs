@@ -1,14 +1,56 @@
 use std::io::{BufRead, BufReader, Read};
 
 fn main() {
-    let f = std::fs::File::open(std::env::args().nth(1).expect("Could not get arg 1"))
-        .expect("Could not open input file");
-    println!("{:?}", find_shortest_path(f));
+    {
+        let f = std::fs::File::open(std::env::args().nth(1).expect("Could not get arg 1"))
+            .expect("Could not open input file");
+
+        println!("Shortest path: {:?}", find_shortest_path(f));
+    }
+
+    {
+        let f = std::fs::File::open(std::env::args().nth(1).expect("Could not get arg 1"))
+            .expect("Could not open input file");
+
+        println!("Least steps path: {:?}", find_least_steps_path(f));
+    }
 }
 
 fn find_shortest_path<R>(read: R) -> Option<(Point, u32)>
 where
     R: Read,
+{
+    process_lines(read, |intersecting_points| {
+        let mut intersecting_points = intersecting_points
+            .iter()
+            .map(|(_, p)| (*p, p.manhattan_distance_to(&Point::ZERO)))
+            .collect::<Vec<_>>();
+        intersecting_points.sort_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap());
+        intersecting_points.reverse();
+
+        intersecting_points.pop()
+    })
+}
+
+fn find_least_steps_path<R>(read: R) -> Option<u32>
+where
+    R: Read,
+{
+    process_lines(read, |intersecting_points| {
+        let mut intersecting_points = intersecting_points
+            .iter()
+            .map(|((lines1, lines2), ..)| lines1.length() + lines2.length())
+            .collect::<Vec<_>>();
+        intersecting_points.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        intersecting_points.reverse();
+        intersecting_points.pop()
+    })
+}
+
+fn process_lines<R, T, F>(read: R, f: F) -> T
+where
+    R: Read,
+    F: Fn(Vec<((Lines, Lines), Point)>) -> T,
 {
     let (path2, path1) = {
         let wires = read_wires(read);
@@ -19,16 +61,9 @@ where
         (paths.pop().unwrap(), paths.pop().unwrap())
     };
 
-    let (lines1, lines2) = (
-        points_to_lines(&path1, vec![]),
-        points_to_lines(&path2, vec![]),
-    );
+    let (lines1, lines2) = (points_to_lines(&path1), points_to_lines(&path2));
 
-    let mut intersecting_points = intersecting_points(&lines1, &lines2);
-    intersecting_points.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-    intersecting_points.reverse();
-
-    intersecting_points.pop()
+    f(intersecting_points(&lines1, &lines2))
 }
 
 #[derive(Debug, PartialEq)]
@@ -42,6 +77,13 @@ type Distance = u32;
 #[derive(PartialEq, Debug)]
 struct Command(Direction, Distance);
 type Wire = Vec<Command>;
+#[derive(PartialEq, Debug, Clone)]
+struct Lines(Vec<Line>);
+impl Lines {
+    fn length(&self) -> u32 {
+        self.0.iter().fold(0, |acc, x| acc + x.length())
+    }
+}
 #[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
 struct Point(i32, i32);
 impl Point {
@@ -85,6 +127,10 @@ impl Line {
 
             Some(Point(px, py))
         }
+    }
+
+    fn length(&self) -> u32 {
+        (((self.1).0 - (self.0).0).abs() + ((self.1).1 - (self.0).1).abs()) as u32
     }
 }
 
@@ -142,26 +188,35 @@ fn commands_to_path(commands: &[Command], p: Point) -> Path {
     [&path[..], &commands_to_path(&commands[1..], p2)[..]].concat()
 }
 
-fn points_to_lines(points: &[Point], mut lines: Vec<Line>) -> Vec<Line> {
+fn points_to_lines(points: &[Point]) -> Vec<Line> {
     match (points.get(0), points.get(1)) {
-        (Some(p1), Some(p2)) => {
-            lines.push(Line(p1.clone(), p2.clone()));
-            points_to_lines(&points[1..], lines)
-        }
-        _ => lines,
+        (Some(p1), Some(p2)) => [
+            &[Line(p1.clone(), p2.clone())],
+            &points_to_lines(&points[1..])[..],
+        ]
+        .concat(),
+        _ => Vec::new(),
     }
 }
 
-fn intersecting_points(lines1: &Vec<Line>, lines2: &Vec<Line>) -> Vec<(Point, u32)> {
-    let mut v = vec![];
+fn intersecting_points(lines1: &Vec<Line>, lines2: &Vec<Line>) -> Vec<((Lines, Lines), Point)> {
+    let mut vr = vec![];
+    let mut v1 = vec![];
     for line1 in lines1 {
+        let mut v2 = vec![];
         for line2 in lines2 {
             if let Some(p) = line1.intersects(&line2) {
-                v.push((p, p.manhattan_distance_to(&Point::ZERO)));
+                let mut lines1 = Lines(v1.iter().cloned().map(|t: &Line| t.clone()).collect());
+                lines1.0.push(Line(line1.0, p));
+                let mut lines2 = Lines(v2.iter().cloned().map(|t: &Line| t.clone()).collect());
+                lines2.0.push(Line(line2.0, p));
+                vr.push(((lines1, lines2), p));
             }
+            v2.push(line2);
         }
+        v1.push(line1);
     }
-    v
+    vr
 }
 
 #[cfg(test)]
@@ -207,7 +262,7 @@ mod tests {
                 Line(Point(1, 1), Point(2, 2)),
                 Line(Point(2, 2), Point(3, 4))
             ],
-            points_to_lines(&[Point(1, 1), Point(2, 2), Point(3, 4)], vec![])
+            points_to_lines(&[Point(1, 1), Point(2, 2), Point(3, 4)])
         );
     }
 
@@ -292,8 +347,8 @@ mod tests {
             path2
         );
 
-        let lines1 = points_to_lines(&path1, vec![]);
-        let lines2 = points_to_lines(&path2, vec![]);
+        let lines1 = points_to_lines(&path1);
+        let lines2 = points_to_lines(&path2);
         assert_eq!(
             vec![
                 Line(Point(0, 0), Point(8, 0)),
@@ -315,12 +370,42 @@ mod tests {
 
         let intersecting_points = intersecting_points(&lines1, &lines2);
         assert_eq!(
-            vec![(Point(6, 5), 11), (Point(3, 3), 6)],
+            vec![
+                (
+                    (
+                        Lines(vec![
+                            Line(Point(0, 0), Point(8, 0)),
+                            Line(Point(8, 0), Point(8, 5)),
+                            Line(Point(8, 5), Point(6, 5))
+                        ]),
+                        Lines(vec![
+                            Line(Point(0, 0), Point(0, 7)),
+                            Line(Point(0, 7), Point(6, 7)),
+                            Line(Point(6, 7), Point(6, 5)),
+                        ])
+                    ),
+                    Point(6, 5)
+                ),
+                (
+                    (
+                        Lines(vec![
+                            Line(Point(0, 0), Point(8, 0)),
+                            Line(Point(8, 0), Point(8, 5)),
+                            Line(Point(8, 5), Point(3, 5)),
+                            Line(Point(3, 5), Point(3, 3))
+                        ]),
+                        Lines(vec![
+                            Line(Point(0, 0), Point(0, 7)),
+                            Line(Point(0, 7), Point(6, 7)),
+                            Line(Point(6, 7), Point(6, 3)),
+                            Line(Point(6, 3), Point(3, 3))
+                        ])
+                    ),
+                    Point(3, 3)
+                ),
+            ],
             intersecting_points
         );
-        //let (_, x) = find_shortest_path().unwrap();
-
-        //assert_eq!(6, x);
     }
 
     #[test]
@@ -345,5 +430,40 @@ mod tests {
         let (_, x) = find_shortest_path(Cursor::new(s)).unwrap();
 
         assert_eq!(135, x);
+    }
+
+    #[test]
+    fn test_least_steps_path_example1() {
+        let s = "
+        R8,U5,L5,D3
+        U7,R6,D4,L4
+        ";
+
+        let x = find_least_steps_path(Cursor::new(s)).unwrap();
+        println!("LINE: {:?}", x);
+    }
+
+    #[test]
+    fn test_least_steps_path_example2() {
+        let s = "
+        R75,D30,R83,U83,L12,D49,R71,U7,L72
+        U62,R66,U55,R34,D71,R55,D58,R83
+        ";
+
+        let x = find_least_steps_path(Cursor::new(s)).unwrap();
+
+        assert_eq!(x, 610);
+    }
+
+    #[test]
+    fn test_least_steps_path_example3() {
+        let s = "
+        R98,U47,R26,D63,R33,U87,L62,D20,R33,U53,R51
+        U98,R91,D20,R16,D67,R40,U7,R15,U6,R7
+        ";
+
+        let x = find_least_steps_path(Cursor::new(s)).unwrap();
+
+        assert_eq!(x, 410);
     }
 }
