@@ -15,12 +15,21 @@ fn main() {
     println!("{}", count);
 }
 
+#[derive(PartialEq, Debug)]
+enum NumbersError {
+    LengthNot6(usize),
+    NumbersNotAllIncreasing,
+    NoTwoNumbersSuccessive,
+}
+
+type NumbersResult<T> = Result<T, NumbersError>;
+
 #[derive(Debug, PartialEq)]
 struct Numbers([u32; 6]);
 impl Numbers {
-    fn new(n: &[u32]) -> Option<Numbers> {
+    fn new(n: &[u32]) -> NumbersResult<Numbers> {
         if n.len() != 6 {
-            return None;
+            return Err(NumbersError::LengthNot6(n.len()));
         }
 
         let mut slice = [0u32; 6];
@@ -36,26 +45,18 @@ impl Numbers {
             })
             .unwrap_or(true)
         {
-            return None;
+            return Err(NumbersError::NumbersNotAllIncreasing);
         }
 
-        // Check that there is atleast two numbers are successive
-        let mut iter = n.iter();
-        if !iter
-            .next()
-            .map(|&n| {
-                iter.fold((false, n), |(accb, accn), &n| (accb || accn == n, n))
-                    .0
-            })
-            .unwrap_or(true)
-        {
-            return None;
+        // Look for invalid digit groups
+        if !count_digits(n).iter().any(|&(_, count)| count == 2) {
+            return Err(NumbersError::NoTwoNumbersSuccessive);
         }
 
-        Some(Numbers(slice))
+        Ok(Numbers(slice))
     }
 
-    fn parse(s: &str) -> Option<Numbers> {
+    fn parse(s: &str) -> NumbersResult<Numbers> {
         // Construct a slice out of the string
         Numbers::new(
             &s.chars()
@@ -64,8 +65,8 @@ impl Numbers {
         )
     }
 
-    fn parse_pair(s1: &str, s2: &str) -> Option<(Numbers, Numbers)> {
-        Some((Numbers::parse(s1)?, Numbers::parse(s2)?))
+    fn parse_pair(s1: &str, s2: &str) -> NumbersResult<(Numbers, Numbers)> {
+        Ok((Numbers::parse(s1)?, Numbers::parse(s2)?))
     }
 
     fn to_u32(&self) -> u32 {
@@ -82,6 +83,16 @@ impl fmt::Display for Numbers {
     }
 }
 
+fn count_digits(slice: &[u32]) -> Vec<(u32, usize)> {
+    slice.iter().fold(vec![], |mut acc, &n| {
+        match acc.last_mut() {
+            Some((acc_digit, acc_count)) if *acc_digit == n => *acc_count += 1,
+            _ => acc.push((n, 1)),
+        };
+        acc
+    })
+}
+
 #[cfg(test)]
 mod numbers_tests {
 
@@ -89,50 +100,89 @@ mod numbers_tests {
 
     #[test]
     fn parse_should_return_none_if_the_length_is_not_6() {
-        assert_eq!(None, Numbers::parse("1234567"));
-        assert_eq!(None, Numbers::parse("12345"));
+        assert_eq!(Err(NumbersError::LengthNot6(7)), Numbers::parse("1234567"));
+        assert_eq!(Err(NumbersError::LengthNot6(5)), Numbers::parse("12345"));
     }
 
     #[test]
     fn parse_should_be_able_to_parse_a_string() {
-        assert_eq!(Some(Numbers([1, 1, 3, 4, 5, 9])), Numbers::parse("113459"));
+        assert_eq!(Ok(Numbers([1, 1, 3, 4, 5, 9])), Numbers::parse("113459"));
     }
 
     #[test]
     fn parse_pair_should_be_able_to_parse_a_pair_of_strings() {
         assert_eq!(
-            Some((Numbers([1, 1, 3, 4, 5, 6]), Numbers([1, 1, 3, 4, 5, 6]))),
+            Ok((Numbers([1, 1, 3, 4, 5, 6]), Numbers([1, 1, 3, 4, 5, 6]))),
             Numbers::parse_pair("113456", "113456")
         );
     }
 
     #[test]
     fn new_should_return_none_if_the_numbers_are_not_increasing() {
-        assert_eq!(None, Numbers::new(&[1, 2, 3, 4, 7, 6]));
+        assert_eq!(
+            Err(NumbersError::NumbersNotAllIncreasing),
+            Numbers::new(&[1, 2, 3, 4, 7, 6])
+        );
     }
 
     #[test]
     fn new_should_return_a_value_if_its_valid() {
         assert_eq!(
-            Some(Numbers([1, 1, 3, 4, 5, 6])),
+            Ok(Numbers([1, 1, 3, 4, 5, 6])),
             Numbers::new(&[1, 1, 3, 4, 5, 6])
         );
     }
 
     #[test]
     fn new_should_return_none_if_no_duplicates_are_found() {
-        assert_eq!(None, Numbers::new(&[1, 2, 3, 4, 5, 6]));
+        assert_eq!(
+            Err(NumbersError::NoTwoNumbersSuccessive),
+            Numbers::new(&[1, 2, 3, 4, 5, 6])
+        );
     }
 
     #[test]
     fn test_parse_examples() {
-        assert!(Numbers::parse("111111").is_some());
-        assert!(Numbers::parse("223450").is_none());
-        assert!(Numbers::parse("123789").is_none());
+        assert_eq!(
+            Err(NumbersError::NoTwoNumbersSuccessive),
+            Numbers::parse("111111")
+        );
+        assert_eq!(
+            Err(NumbersError::NumbersNotAllIncreasing),
+            Numbers::parse("223450")
+        );
+        assert_eq!(
+            Err(NumbersError::NoTwoNumbersSuccessive),
+            Numbers::parse("123789")
+        );
     }
 
     #[test]
     fn to_u32_should_return_the_number_as_u32() {
         assert_eq!(112234, Numbers::parse("112234").unwrap().to_u32());
+    }
+
+    #[test]
+    fn test_parse_examples_part2() {
+        assert!(Numbers::parse("112233").is_ok());
+        assert_eq!(
+            Err(NumbersError::NoTwoNumbersSuccessive),
+            Numbers::parse("123444")
+        );
+        assert!(Numbers::parse("111122").is_ok());
+    }
+}
+
+#[cfg(test)]
+mod group_tests {
+
+    use super::*;
+
+    #[test]
+    fn test_count_digits() {
+        assert_eq!(
+            vec![(1, 2), (2, 2), (3, 4), (7, 1)],
+            count_digits(&[1, 1, 2, 2, 3, 3, 3, 3, 7])
+        );
     }
 }
