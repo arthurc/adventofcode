@@ -373,13 +373,14 @@ mod tests {
         );
     }
 
+    #[test]
     fn test_execute_instr_jf_jump_taken() {
-        let mut program = Program::new(vec![5, 1, 7]);
+        let mut program = Program::new(vec![5, 0, 7]);
 
         program.execute_instr(
             Instr(
                 Opcode::JF(ParameterMode::Immediate, ParameterMode::Immediate),
-                vec![1, 7],
+                vec![0, 7],
             ),
             &mut Cursor::new(""),
             &mut Cursor::new(Vec::new()),
@@ -388,7 +389,7 @@ mod tests {
         assert_eq!(
             Program {
                 pc: 7,
-                code: vec![6, 0, 7],
+                code: vec![5, 0, 7],
                 finished: false
             },
             program
