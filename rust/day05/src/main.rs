@@ -26,6 +26,80 @@ where
 type Pc = usize;
 type Code = Vec<i32>;
 
+#[derive(Debug, PartialEq)]
+enum Opcode {
+    Add(ParameterMode, ParameterMode),
+    Mul(ParameterMode, ParameterMode),
+    In,
+    Out(ParameterMode),
+    JT(ParameterMode, ParameterMode),
+    JF(ParameterMode, ParameterMode),
+    LT(ParameterMode, ParameterMode),
+    EQ(ParameterMode, ParameterMode),
+    Fin,
+}
+impl Opcode {
+    fn decode(i: i32) -> Option<Opcode> {
+        macro_rules! param {
+            ($idx:expr) => {{
+                let ii = i / (100 * 10i32.pow($idx));
+                ParameterMode::parse(ii - 10 * (ii / 10)).unwrap()
+            }};
+        }
+
+        // Pick out the last two digits to determine the opcode
+        match i - 100 * (i / 100) {
+            1 => Some(Opcode::Add(param!(0), param!(1))),
+            2 => Some(Opcode::Mul(param!(0), param!(1))),
+            3 => Some(Opcode::In),
+            4 => Some(Opcode::Out(param!(0))),
+            5 => Some(Opcode::JT(param!(0), param!(1))),
+            6 => Some(Opcode::JF(param!(0), param!(1))),
+            7 => Some(Opcode::LT(param!(0), param!(1))),
+            8 => Some(Opcode::EQ(param!(0), param!(1))),
+            99 => Some(Opcode::Fin),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+struct Instr(Opcode, Vec<i32>);
+impl Instr {
+    fn decode(code: &[i32]) -> Option<Instr> {
+        let opcode = Opcode::decode(code[0])?;
+
+        let params = match opcode {
+            Opcode::Add(..) => Some(vec![code[1], code[2], code[3]]),
+            Opcode::Mul(..) => Some(vec![code[1], code[2], code[3]]),
+            Opcode::In => Some(vec![code[1]]),
+            Opcode::Out(..) => Some(vec![code[1]]),
+            Opcode::JT(..) => Some(vec![code[1], code[2]]),
+            Opcode::JF(..) => Some(vec![code[1], code[2]]),
+            Opcode::LT(..) => Some(vec![code[1], code[2], code[3]]),
+            Opcode::EQ(..) => Some(vec![code[1], code[2], code[3]]),
+            Opcode::Fin => Some(vec![]),
+        };
+
+        params.map(|p| Instr(opcode, p))
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum ParameterMode {
+    Position,
+    Immediate,
+}
+impl ParameterMode {
+    fn parse(n: i32) -> Option<ParameterMode> {
+        match n {
+            0 => Some(ParameterMode::Position),
+            1 => Some(ParameterMode::Immediate),
+            _ => None,
+        }
+    }
+}
+
 #[derive(PartialEq, Debug)]
 struct Program {
     pc: Pc,
@@ -89,75 +163,32 @@ impl Program {
                 out.write_fmt(format_args!("{}", a)).unwrap();
                 self.pc += 2;
             }
+            Instr(JT(pa, pb), params) => {
+                let (a, b) = (param_v!(params, pa, 0), param_v!(params, pb, 1));
+
+                self.pc = if a != 0 { b as usize } else { self.pc + 3usize };
+            }
+            Instr(JF(pa, pb), params) => {
+                let (a, b) = (param_v!(params, pa, 0), param_v!(params, pb, 1));
+
+                self.pc = if a == 0 { b as usize } else { self.pc + 3usize };
+            }
+            Instr(LT(pa, pb), params) => {
+                let (a, b, t) = (param_v!(params, pa, 0), param_v!(params, pb, 1), params[2]);
+
+                self.code[t as usize] = if a < b { 1 } else { 0 };
+                self.pc += 4;
+            }
+            Instr(EQ(pa, pb), params) => {
+                let (a, b, t) = (param_v!(params, pa, 0), param_v!(params, pb, 1), params[2]);
+
+                self.code[t as usize] = if a == b { 1 } else { 0 };
+                self.pc += 4;
+            }
             Instr(Fin, ..) => self.finished = true,
         }
     }
 }
-
-#[derive(Debug, PartialEq)]
-enum Opcode {
-    Add(ParameterMode, ParameterMode),
-    Mul(ParameterMode, ParameterMode),
-    In,
-    Out(ParameterMode),
-    Fin,
-}
-impl Opcode {
-    fn decode(i: i32) -> Option<Opcode> {
-        macro_rules! param {
-            ($idx:expr) => {{
-                let ii = i / (100 * 10i32.pow($idx));
-                ParameterMode::parse(ii - 10 * (ii / 10)).unwrap()
-            }};
-        }
-
-        // Pick out the last two digits to determine the opcode
-        match i - 100 * (i / 100) {
-            1 => Some(Opcode::Add(param!(0), param!(1))),
-            2 => Some(Opcode::Mul(param!(0), param!(1))),
-            3 => Some(Opcode::In),
-            4 => Some(Opcode::Out(param!(0))),
-            99 => Some(Opcode::Fin),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-struct Instr(Opcode, Vec<i32>);
-impl Instr {
-    fn decode(code: &[i32]) -> Option<Instr> {
-        let opcode = Opcode::decode(code[0])?;
-
-        let params = match opcode {
-            Opcode::Add(..) => Some(vec![code[1], code[2], code[3]]),
-            Opcode::Mul(..) => Some(vec![code[1], code[2], code[3]]),
-            Opcode::In => Some(vec![code[1]]),
-            Opcode::Out(..) => Some(vec![code[1]]),
-            Opcode::Fin => Some(vec![]),
-        };
-
-        params.map(|p| Instr(opcode, p))
-    }
-}
-
-#[derive(Debug, PartialEq)]
-enum ParameterMode {
-    Position,
-    Immediate,
-}
-impl ParameterMode {
-    fn parse(n: i32) -> Option<ParameterMode> {
-        match n {
-            0 => Some(ParameterMode::Position),
-            1 => Some(ParameterMode::Immediate),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-struct Parameter(ParameterMode, i32);
 
 #[cfg(test)]
 mod tests {
@@ -297,6 +328,189 @@ mod tests {
     }
 
     #[test]
+    fn test_execute_instr_jt_jump_taken() {
+        let mut program = Program::new(vec![5, 1, 7]);
+
+        program.execute_instr(
+            Instr(
+                Opcode::JT(ParameterMode::Immediate, ParameterMode::Immediate),
+                vec![1, 7],
+            ),
+            &mut Cursor::new(""),
+            &mut Cursor::new(Vec::new()),
+        );
+
+        assert_eq!(
+            Program {
+                pc: 7,
+                code: vec![5, 1, 7],
+                finished: false
+            },
+            program
+        );
+    }
+
+    #[test]
+    fn test_execute_instr_jt_jump_not_taken() {
+        let mut program = Program::new(vec![5, 0, 7]);
+
+        program.execute_instr(
+            Instr(
+                Opcode::JT(ParameterMode::Immediate, ParameterMode::Immediate),
+                vec![0, 7],
+            ),
+            &mut Cursor::new(""),
+            &mut Cursor::new(Vec::new()),
+        );
+
+        assert_eq!(
+            Program {
+                pc: 3,
+                code: vec![5, 0, 7],
+                finished: false
+            },
+            program
+        );
+    }
+
+    fn test_execute_instr_jf_jump_taken() {
+        let mut program = Program::new(vec![5, 1, 7]);
+
+        program.execute_instr(
+            Instr(
+                Opcode::JF(ParameterMode::Immediate, ParameterMode::Immediate),
+                vec![1, 7],
+            ),
+            &mut Cursor::new(""),
+            &mut Cursor::new(Vec::new()),
+        );
+
+        assert_eq!(
+            Program {
+                pc: 7,
+                code: vec![6, 0, 7],
+                finished: false
+            },
+            program
+        );
+    }
+
+    #[test]
+    fn test_execute_instr_jf_jump_not_taken() {
+        let mut program = Program::new(vec![6, 1, 7]);
+
+        program.execute_instr(
+            Instr(
+                Opcode::JF(ParameterMode::Immediate, ParameterMode::Immediate),
+                vec![1, 7],
+            ),
+            &mut Cursor::new(""),
+            &mut Cursor::new(Vec::new()),
+        );
+
+        assert_eq!(
+            Program {
+                pc: 3,
+                code: vec![6, 1, 7],
+                finished: false
+            },
+            program
+        );
+    }
+
+    #[test]
+    fn test_execute_instr_lt_true() {
+        let mut program = Program::new(vec![8, 1, 7, 0]);
+
+        program.execute_instr(
+            Instr(
+                Opcode::LT(ParameterMode::Immediate, ParameterMode::Immediate),
+                vec![1, 7, 0],
+            ),
+            &mut Cursor::new(""),
+            &mut Cursor::new(Vec::new()),
+        );
+
+        assert_eq!(
+            Program {
+                pc: 4,
+                code: vec![1, 1, 7, 0],
+                finished: false
+            },
+            program
+        );
+    }
+
+    #[test]
+    fn test_execute_instr_lt_false() {
+        let mut program = Program::new(vec![8, 8, 7, 0]);
+
+        program.execute_instr(
+            Instr(
+                Opcode::LT(ParameterMode::Immediate, ParameterMode::Immediate),
+                vec![8, 7, 0],
+            ),
+            &mut Cursor::new(""),
+            &mut Cursor::new(Vec::new()),
+        );
+
+        assert_eq!(
+            Program {
+                pc: 4,
+                code: vec![0, 8, 7, 0],
+                finished: false
+            },
+            program
+        );
+    }
+
+    #[test]
+    fn test_execute_instr_eq_true() {
+        let mut program = Program::new(vec![9, 1, 1, 0]);
+
+        program.execute_instr(
+            Instr(
+                Opcode::EQ(ParameterMode::Immediate, ParameterMode::Immediate),
+                vec![1, 1, 0],
+            ),
+            &mut Cursor::new(""),
+            &mut Cursor::new(Vec::new()),
+        );
+
+        assert_eq!(
+            Program {
+                pc: 4,
+                code: vec![1, 1, 1, 0],
+                finished: false
+            },
+            program
+        );
+    }
+
+    #[test]
+    fn test_execute_instr_eq_false() {
+        let mut program = Program::new(vec![9, 8, 7, 0]);
+
+        program.execute_instr(
+            Instr(
+                Opcode::EQ(ParameterMode::Immediate, ParameterMode::Immediate),
+                vec![8, 7, 0],
+            ),
+            &mut Cursor::new(""),
+            &mut Cursor::new(Vec::new()),
+        );
+
+        assert_eq!(
+            Program {
+                pc: 4,
+                code: vec![0, 8, 7, 0],
+                finished: false
+            },
+            program
+        );
+    }
+
+    #[test]
     fn test_code() {
         let expected = vec![3500, 9, 10, 70, 2, 3, 11, 0, 99, 30, 40, 50];
         let mut program = Program::new(vec![1, 9, 10, 3, 2, 3, 11, 0, 99, 30, 40, 50]);
@@ -366,7 +580,19 @@ mod opcode_tests {
             Opcode::decode(4)
         );
         assert_eq!(Some(Opcode::Fin), Opcode::decode(99));
-        assert_eq!(None, Opcode::decode(5));
+        assert_eq!(None, Opcode::decode(9));
+        assert_eq!(
+            Some(Opcode::JT(ParameterMode::Position, ParameterMode::Position)),
+            Opcode::decode(5)
+        );
+        assert_eq!(
+            Some(Opcode::JF(ParameterMode::Position, ParameterMode::Position)),
+            Opcode::decode(6)
+        );
+        assert_eq!(
+            Some(Opcode::LT(ParameterMode::Position, ParameterMode::Position)),
+            Opcode::decode(7)
+        );
     }
 
     #[test]
@@ -407,6 +633,34 @@ mod instr_tests {
         assert_eq!(
             Some(Instr(Opcode::Out(ParameterMode::Position), vec![2])),
             Instr::decode(&[4, 2])
+        );
+        assert_eq!(
+            Some(Instr(
+                Opcode::JT(ParameterMode::Position, ParameterMode::Position),
+                vec![2, 3]
+            )),
+            Instr::decode(&[5, 2, 3])
+        );
+        assert_eq!(
+            Some(Instr(
+                Opcode::JF(ParameterMode::Position, ParameterMode::Position),
+                vec![2, 3]
+            )),
+            Instr::decode(&[6, 2, 3])
+        );
+        assert_eq!(
+            Some(Instr(
+                Opcode::LT(ParameterMode::Position, ParameterMode::Position),
+                vec![2, 3, 4]
+            )),
+            Instr::decode(&[7, 2, 3, 4])
+        );
+        assert_eq!(
+            Some(Instr(
+                Opcode::EQ(ParameterMode::Position, ParameterMode::Position),
+                vec![2, 3, 4]
+            )),
+            Instr::decode(&[8, 2, 3, 4])
         );
     }
 }
